@@ -125,8 +125,10 @@ describe("emitting models", () => {
       }
     `, undefined, {emitNamespace: true, emitTypes: ['test.Foo']});
     const file = files["main.csv"];
-    assert.strictEqual(stripHeader(file),
-      "r,Main,,Foo,outside,,,5022,740c00,value,,UCH,,,"
+    assert.strictEqual(file,
+      "type,circuit,level,name,comment,qq,zz,pbsb,id,crc,*name,part,type,divisor/values,unit,comment\n"
+      +"*r,\n"
+      +"r,Main,,Foo,outside,,,5022,740c00,crc8;poly=5c,value,,UCH,,,\n"
     );
   });
   it("works with @wcrc (runtime checksum marker, checksum of the ID as placeholder)", async () => {
@@ -142,8 +144,73 @@ describe("emitting models", () => {
       }
     `, undefined, {emitNamespace: true, emitTypes: ['test.Foo']});
     const file = files["main.csv"];
-    assert.strictEqual(stripHeader(file),
-      "r,Main,,Foo,[WCRC] outside,,,5022,740c00,value,,UCH,,,"
+    assert.strictEqual(file,
+      "type,circuit,level,name,comment,qq,zz,pbsb,id,crc,*name,part,type,divisor/values,unit,comment\n"
+      +"*r,\n"
+      +"r,Main,,Foo,[WCRC] outside,,,5022,740c00,crc8;poly=5c,value,,UCH,,,\n"
+    );
+  });
+  it("works with message attributes only in the file using them", async () => {
+    const files = await emit(`
+      using Ebus.Num;
+      @base(0x50, 0x22)
+      model base {}
+      @crc(0x5c, 0x0c, 0x00)
+      @inherit(base)
+      model Foo {
+        value: UCH,
+      }
+      @attr("other", "x,y")
+      @ext(0x0d, 0x00)
+      @inherit(base)
+      model Bar {
+        value: UCH,
+      }
+      @ext(0x0e, 0x00)
+      @inherit(base)
+      model Baz {
+        value: UCH,
+      }
+    `, undefined, {emitNamespace: true, emitTypes: ['test.Foo', 'test.Bar', 'test.Baz']});
+    const file = files["main.csv"];
+    assert.strictEqual(file,
+      "type,circuit,level,name,comment,qq,zz,pbsb,id,crc,other,*name,part,type,divisor/values,unit,comment\n"
+      +"*r,\n"
+      +"r,Main,,Foo,,,,5022,740c00,crc8;poly=5c,,value,,UCH,,,\n"
+      +"r,Main,,Bar,,,,5022,0d00,,\"x,y\",value,,UCH,,,\n"
+      +"r,Main,,Baz,,,,5022,0e00,,,value,,UCH,,,\n"
+    );
+  });
+  it("works with @fills", async () => {
+    const files = await emit(`
+      using Ebus.Num;
+      @base(0x50, 0x22)
+      model base {}
+      @ext(0x1b, 0x01)
+      @inherit(base)
+      model HolidayStartDay {
+        value: UIN,
+      }
+      @ext(0x1c, 0x01)
+      @inherit(base)
+      model HolidayStartMonth {
+        value: UIN,
+      }
+      @ext(0x1b, 0x01, 0x1c, 0x01)
+      @inherit(base)
+      model HolidayStart {
+        @fills(HolidayStartDay) day: UIN,
+        @fills(HolidayStartMonth) month: UIN,
+        rest: UCH,
+      }
+    `, undefined, {emitNamespace: true, emitTypes: ['test.HolidayStartDay', 'test.HolidayStartMonth', 'test.HolidayStart']});
+    const file = files["main.csv"];
+    assert.strictEqual(file,
+      "type,circuit,level,name,comment,qq,zz,pbsb,id,*name,part,type,divisor/values,unit,fills,comment\n"
+      +"*r,\n"
+      +"r,Main,,HolidayStartDay,,,,5022,1b01,value,,UIN,,,,\n"
+      +"r,Main,,HolidayStartMonth,,,,5022,1c01,value,,UIN,,,,\n"
+      +"r,Main,,HolidayStart,,,,5022,1b011c01,day,,UIN,,,HolidayStartDay,,month,,UIN,,,HolidayStartMonth,,rest,,UCH,,,,\n"
     );
   });
   it("works with @inherit from namespace", async () => {

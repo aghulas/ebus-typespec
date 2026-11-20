@@ -86,15 +86,21 @@ extern dec base(target: Model, pb: valueof pb, sb: valueof sb, ...dd: valueof sy
 extern dec ext(target: Model, ...dd: valueof symbol[]);
 
 /**
- * Like `@ext`, but the first ID byte is a CRC-8 checksum (no reflection, initial value = the
- * first address byte) computed over the remaining ID bytes. Lets a message address be written
- * without spelling out the checksum.
- * @param poly the CRC-8 polynomial (e.g. 0x5c for Kromschröder/Weishaupt register reads).
+ * Like `@ext`, but the first ID byte is a CRC-8 checksum (calculated like the eBUS frame CRC,
+ * i.e. initial value 0, which equals the first byte) computed over the remaining ID bytes. Lets a
+ * message address be written without spelling out the checksum.
+ * Also sets the message attribute "crc" to "crc8;poly=<poly>", so that ebusd versions knowing it
+ * compute the checksum over the ID and the data when sending (needed for writes, where the data
+ * is covered too) and check it on receipt. ebusd versions without it use the byte as emitted,
+ * which is correct for a request without data.
+ * @param poly the CRC-8 polynomial (e.g. 0x5c for Wolf and Kromschröder/Weishaupt register messages).
  * @param dd message ID extension parts the checksum is computed over.
  */
 extern dec crc(target: Model, poly: valueof uint8, ...dd: valueof symbol[]);
 
 /**
+ * Deprecated: same as `@crc(0x5c, ...)`, and additionally writes the marker "[WCRC]" in the comment
+ * for ebusd builds that only know that marker.
  * Like `@ext`, but the first ID byte stands for a checksum that ebusd computes at send time and
  * verifies on receipt, for messages whose comment carries the WCRC marker.
  * Use for writes, where the checksum covers the data and cannot be precomputed (ebusd #167).
@@ -162,7 +168,17 @@ extern dec unit(target: numeric|ModelProperty, value: valueof string, category?:
  * @param name the name of the attribute.
  * @param value the optional attribute value (can be omitted for boolean).
  */
-extern dec attr(target: Scalar|ModelProperty, name: valueof string, value?: valueof string);
+extern dec attr(target: Scalar|ModelProperty|Model, name: valueof string, value?: valueof string);
+
+/**
+ * Define that the field fills the message in the same namespace (circuit) with the field's bytes,
+ * i.e. that this message is a carrier answering the value of another message, e.g. a read of
+ * several registers in one telegram filling the messages reading a single register.
+ * The target message has to be a read message without master data whose answer has the length of
+ * the field(s) filling it. Emitted as field attribute "fills".
+ * @param message the message filled by this field.
+ */
+extern dec fills(target: ModelProperty, message: Model);
 
 /**
  * Define the divisor.

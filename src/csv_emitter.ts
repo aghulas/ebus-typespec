@@ -5,7 +5,7 @@ import {DuplicateTracker} from "@typespec/compiler/utils";
 import * as jsYaml from "js-yaml";
 import {basename, extname} from "path";
 import {
-  getAttrs, getAuth, getChain, getConditions, getConstValue, getDivisor, getId, getInherit, getMaxBits, getOut, getPassive, getPoll,
+  getAttrs, getAuth, getChain, getConditions, getConstValue, getDivisor, getFills, getId, getInherit, getMaxBits, getOut, getPassive, getPoll,
   getPrefixName, getQq, getReadonly, getSourceAddr, getStep, getUnit, getValues, getWrite, getZz, isSourceAddr, isWcrc
 } from "./decorators.js";
 import {StateKeys, reportDiagnostic, type EbusdEmitterOptions} from "./lib.js";
@@ -17,6 +17,10 @@ const hexs = (vs?: number[]): string => vs?vs.map(hex).join(''):'';
 const fileParent = (n: Node): TypeSpecScriptNode['file'] => (n as TypeSpecScriptNode).file || n.parent && fileParent(n.parent as Node);
 const isSourceFileWithPath = (scope: Scope<object>): scope is SourceFileScope<object> => scope.kind === "sourceFile" && !!scope.sourceFile.path;
 const escape = (s?: string) => s&&(s.includes('"')||s?.includes(',')) ? `"${s.replaceAll('"', '""')}"` : s;
+/** marker around the URI encoded JSON of the message attributes, replaced by columns per file. */
+const MSG_ATTRS_TOKEN = '\u0001';
+/** marker before the name of the message filled by a field, replaced by a column per file. */
+const FILLS_TOKEN = '\u0002';
 const pascalCase = (s?: string) => s ? s.substring(0,1).toUpperCase()+s.substring(1) : s;
 const isDigit = (ch: string) => ch>='0' && ch<='9';
 const normName: Record<'circuit'|'message'|'field', (s?: string) => string|undefined> = {
@@ -284,7 +288,14 @@ export class EbusdEmitter extends CodeTypeEmitter<EbusdEmitterOptions> {
       const poll = direction==='r' && !level && getPoll(program, model);
       // message: type,circuit,level,name,comment,qq,zz,pbsb,id,...fields
       // field: name,part,type,divisor/values,unit,comment
-      const message = [conds+direction+(poll||''), normName.circuit(nearestCircuit), level, normName.message(name), escape(comment), hex(qq), hex(zz), pbsb, ids]
+      const msgAttrs: {[key: string]: string} = {};
+      for (const attrs of [inheritFrom && getAttrs(program, inheritFrom), getAttrs(program, model)]) {
+        for (const [key, value] of Object.entries(attrs||{})) {
+          msgAttrs[key] = value===true ? 'true' : value;
+        }
+      }
+      const attrsToken = MSG_ATTRS_TOKEN+encodeURIComponent(JSON.stringify(msgAttrs))+MSG_ATTRS_TOKEN;
+      const message = [conds+direction+(poll||''), normName.circuit(nearestCircuit), level, normName.message(name), escape(comment), hex(qq), hex(zz), pbsb, ids, attrsToken]
       decls.push([...message, ...(baseFields?[baseFields]:[]), fields].join());
     }
     return this.emitter.result.declaration(name, decls.join('\n'));
@@ -466,6 +477,20 @@ export class EbusdEmitter extends CodeTypeEmitter<EbusdEmitterOptions> {
       } else if (res.length) {
         typ += ':'+(res.remainLength?'*':res.length);
       }
+      let fills = '';
+      const fillsTarget = getFills(program, p);
+      if (fillsTarget) {
+        if (fillsTarget.namespace !== model.namespace) {
+          reportDiagnostic(program, {
+            code: "fills-namespace",
+            format: { name: fillsTarget.name },
+            target: p,
+          });
+        }
+        const sf = this.#getCurrentSourceFile();
+        const {prefix} = sf ? this.getNearestZzNamespace(sf, fillsTarget, undefined) : {prefix: undefined};
+        fills = normName.message(prefix && !fillsTarget.name.startsWith(prefix) ? prefix+fillsTarget.name : fillsTarget.name)||'';
+      }
       // remove explicit res.dir if matches message default
       const field = [
         normName.field(res.pname),
@@ -476,6 +501,7 @@ export class EbusdEmitter extends CodeTypeEmitter<EbusdEmitterOptions> {
         res.unit?.[0],
         ...(this.withUnitCategory ? [res.unit?.[1] ? res.unit[1] : ''] : []),
         ...(this.withAttributes ? this.withAttributes.map(k => res.attrs?.[k] ? res.attrs[k]===true?'true':escape(res.attrs[k]) : '') : []),
+        FILLS_TOKEN+fills,
         escape(res.comment),
       ];
       if (first) {
@@ -623,17 +649,37 @@ export class EbusdEmitter extends CodeTypeEmitter<EbusdEmitterOptions> {
     Array.from(sourceFile.imports.values())
     .sort((a, b) => a.length-b.length) // have the single column defaults at the top
     .forEach(i => b.push(`*${i.join()}\n`));
+    let lines = content.filter(l=>l).join('\n')+'\n';
+    // message attributes: one column per attribute used in this file only
+    const attrsRegex = new RegExp(`,${MSG_ATTRS_TOKEN}([^${MSG_ATTRS_TOKEN}]*)${MSG_ATTRS_TOKEN}`, 'g');
+    const attrNames = new Set<string>();
+    for (const m of lines.matchAll(attrsRegex)) {
+      Object.keys(JSON.parse(decodeURIComponent(m[1]))).forEach(k => attrNames.add(k));
+    }
+    const msgAttrNames = Array.from(attrNames).sort();
+    lines = lines.replace(attrsRegex, (_, json) => {
+      if (!msgAttrNames.length) {
+        return '';
+      }
+      const attrs = JSON.parse(decodeURIComponent(json));
+      return ','+msgAttrNames.map(k => escape(attrs[k])||'').join();
+    });
+    // field attribute "fills": a column only in files using it
+    const withFills = new RegExp(`${FILLS_TOKEN}[^,\n]`).test(lines);
+    lines = withFills ? lines.replaceAll(FILLS_TOKEN, '') : lines.replaceAll(','+FILLS_TOKEN, '');
     return {
       contents:
         `type,circuit,level,name,comment,qq,zz,pbsb,id,`
+        +(msgAttrNames.length?msgAttrNames.join()+',':'')
         +`*name,part,type,divisor/values,`
         +(this.withMinMax?'range,':'')
         +`unit,`
         +(this.withUnitCategory?'category,':'')
         +(this.withAttributes?this.withAttributes.join()+',':'')
+        +(withFills?'fills,':'')
         +`comment\n`
         +b.reduce()
-        +content.filter(l=>l).join('\n')+'\n',
+        +lines,
       path: sourceFile.path,
     };
   }

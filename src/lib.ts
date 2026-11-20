@@ -152,6 +152,12 @@ export const $lib = createTypeSpecLibrary({
         default: paramMessage`Invalid ${"which"} length ${"value"}.`,
       },
     },
+    "fills-namespace": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Message "${"name"}" filled by a field is not in the same namespace.`,
+      },
+    },
     "missing-decorator": {
       severity: "error",
       messages: {
@@ -184,6 +190,7 @@ export const $lib = createTypeSpecLibrary({
     reverse: { description: "reverse representation" },
     unit: { description: "unit and optional category" },
     attr: { description: "additional attribute" },
+    fills: { description: "message filled by a field" },
     divisor: { description: "divisor" },
     step: { description: "step" },
     values: { description: "known values" },

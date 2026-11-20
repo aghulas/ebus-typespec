@@ -111,6 +111,7 @@ Available ruleSets:
 - [`@example`](#@example)
 - [`@ext`](#@ext)
 - [`@factor`](#@factor)
+- [`@fills`](#@fills)
 - [`@id`](#@id)
 - [`@in`](#@in)
 - [`@inherit`](#@inherit)
@@ -137,7 +138,7 @@ Define an additional attribute.
 
 ##### Target
 
-`Scalar | ModelProperty`
+`Scalar | ModelProperty | Model`
 
 ##### Parameters
 
@@ -265,9 +266,13 @@ Define the const value.
 
 #### `@crc`
 
-Like `@ext`, but the first ID byte is a CRC-8 checksum (no reflection, initial value = the
-first address byte) computed over the remaining ID bytes. Lets a message address be written
-without spelling out the checksum.
+Like `@ext`, but the first ID byte is a CRC-8 checksum (calculated like the eBUS frame CRC,
+i.e. initial value 0, which equals the first byte) computed over the remaining ID bytes. Lets a
+message address be written without spelling out the checksum.
+Also sets the message attribute "crc" to "crc8;poly=<poly>", so that ebusd versions knowing it
+compute the checksum over the ID and the data when sending (needed for writes, where the data
+is covered too) and check it on receipt. ebusd versions without it use the byte as emitted,
+which is correct for a request without data.
 
 ```typespec
 @Ebus.crc(poly: valueof uint8, ...dd: valueof Ebus.symbol[])
@@ -279,10 +284,10 @@ without spelling out the checksum.
 
 ##### Parameters
 
-| Name | Type               | Description                                                                 |
-| ---- | ------------------ | --------------------------------------------------------------------------- |
-| poly | `valueof uint8`    | the CRC-8 polynomial (e.g. 0x5c for Kromschröder/Weishaupt register reads). |
-| dd   | `valueof symbol[]` | message ID extension parts the checksum is computed over.                   |
+| Name | Type               | Description                                                                             |
+| ---- | ------------------ | --------------------------------------------------------------------------------------- |
+| poly | `valueof uint8`    | the CRC-8 polynomial (e.g. 0x5c for Wolf and Kromschröder/Weishaupt register messages). |
+| dd   | `valueof symbol[]` | message ID extension parts the checksum is computed over.                               |
 
 #### `@divisor`
 
@@ -357,6 +362,28 @@ Define the factor.
 | Name  | Type              | Description |
 | ----- | ----------------- | ----------- |
 | value | `valueof numeric` | the factor. |
+
+#### `@fills`
+
+Define that the field fills the message in the same namespace (circuit) with the field's bytes,
+i.e. that this message is a carrier answering the value of another message, e.g. a read of
+several registers in one telegram filling the messages reading a single register.
+The target message has to be a read message without master data whose answer has the length of
+the field(s) filling it. Emitted as field attribute "fills".
+
+```typespec
+@Ebus.fills(message: Model)
+```
+
+##### Target
+
+`ModelProperty`
+
+##### Parameters
+
+| Name    | Type    | Description                       |
+| ------- | ------- | --------------------------------- |
+| message | `Model` | the message filled by this field. |
 
 #### `@id`
 
@@ -575,6 +602,8 @@ Define the known values.
 
 #### `@wcrc`
 
+Deprecated: same as `@crc(0x5c, ...)`, and additionally writes the marker "[WCRC]" in the comment
+for ebusd builds that only know that marker.
 Like `@ext`, but the first ID byte stands for a checksum that ebusd computes at send time and
 verifies on receipt, for messages whose comment carries the WCRC marker.
 Use for writes, where the checksum covers the data and cannot be precomputed (ebusd #167).

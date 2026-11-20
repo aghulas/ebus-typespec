@@ -401,10 +401,21 @@ export function $crc(context: DecoratorContext, target: Model, poly: Numeric, ..
     });
   }
   const bytes = dd.map(v => getNum(v) as number);
-  const crc = crc8(getNum(poly) as number, bytes);
+  const polyNum = getNum(poly) as number;
+  const crc = crc8(polyNum, bytes);
   const id: IdType = {id: [Numeric(crc.toString()), ...dd], isExt: true};
   context.program.stateMap(StateKeys.id).set(target, id);
   context.program.stateSet(StateKeys.id).add(target);
+  $attr(context, target, 'crc', crcAttribute(polyNum));
+}
+
+/**
+ * Return the value of the message attribute "crc" for a CRC-8 in the first ID byte after PB/SB.
+ * @param poly the CRC-8 polynomial.
+ * @returns the attribute value.
+ */
+function crcAttribute(poly: number): string {
+  return `crc8;poly=${(poly & 0xff).toString(16).padStart(2, '0')}`;
 }
 
 /**
@@ -432,6 +443,7 @@ export function $wcrc(context: DecoratorContext, target: Model, ...dd: Numeric[]
   context.program.stateMap(StateKeys.id).set(target, id);
   context.program.stateSet(StateKeys.id).add(target);
   context.program.stateMap(StateKeys.wcrc).set(target, true);
+  $attr(context, target, 'crc', crcAttribute(WCRC_POLY));
 }
 
 /**
@@ -849,7 +861,7 @@ export function getUnit(program: Program, target: Scalar|ModelProperty): [string
  * @param name the name of the attribute.
  * @param value the optional attribute value (can be omitted for boolean).
  */
-export function $attr(context: DecoratorContext, target: Scalar|ModelProperty, name: string, value?: string) {
+export function $attr(context: DecoratorContext, target: Scalar|ModelProperty|Model, name: string, value?: string) {
   let values = context.program.stateMap(StateKeys.attr).get(target);
   if (!values) {
     values = {};
@@ -865,8 +877,30 @@ export function $attr(context: DecoratorContext, target: Scalar|ModelProperty, n
  * @param target Decorator target.
  * @returns value if provided on the given target or undefined.
  */
-export function getAttrs(program: Program, target: Scalar|ModelProperty): {[key: string]: string|true} | undefined {
+export function getAttrs(program: Program, target: Scalar|ModelProperty|Model): {[key: string]: string|true} | undefined {
   return program.stateMap(StateKeys.attr).get(target);
+}
+
+/**
+ * Implementation of the `@fills` decorator.
+ *
+ * @param context Decorator context.
+ * @param target Decorator target.
+ * @param message the message filled by the field.
+ */
+export function $fills(context: DecoratorContext, target: ModelProperty, message: Model) {
+  context.program.stateMap(StateKeys.fills).set(target, message);
+}
+
+/**
+ * Accessor for the `@fills` decorator.
+ *
+ * @param program TypeSpec program.
+ * @param target Decorator target.
+ * @returns the message filled by the field, or undefined.
+ */
+export function getFills(program: Program, target: ModelProperty): Model | undefined {
+  return program.stateMap(StateKeys.fills).get(target);
 }
 
 /**
